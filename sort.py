@@ -20,11 +20,11 @@ from __future__ import print_function
 import os
 import numpy as np
 import matplotlib
-matplotlib.use('TkAgg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from skimage import io
-
+import scipy.stats
 import glob
 import time
 import argparse
@@ -96,7 +96,7 @@ class KalmanBoxTracker(object):
   This class represents the internal state of individual tracked objects observed as bbox.
   """
   count = 0
-  def __init__(self,bbox):
+  def __init__(self,bbox, df=None):
     """
     Initialises a tracker using initial bounding box.
     """
@@ -119,6 +119,7 @@ class KalmanBoxTracker(object):
     self.hits = 0
     self.hit_streak = 0
     self.age = 0
+    self.df=df
 
   def update(self,bbox):
     """
@@ -149,9 +150,57 @@ class KalmanBoxTracker(object):
     Returns the current bounding box estimate.
     """
     return convert_x_to_bbox(self.kf.x)
+def model_batch(detections,trackers,model):
+  mean, var= model
+  trcks=np.array([(trackers[:,0]+trackers[:,2])/2 ,trackers[:,3]]).T
+  dets= np.array([(detections[:,0]+detections[:,2])/2 , detections[:,3]]).T
+  distances=np.linalg.norm(trcks[None,:,:]-dets[:,None,:], axis=2).astype(np.float128)
+  position_diff=scipy.stats.norm(loc=mean, scale=var**0.5).pdf(distances) 
+  if(min(position_diff.shape)>0):
+    position_diff= (position_diff-np.min(position_diff))/ (np.max(position_diff)-np.min(position_diff))
+  return position_diff
+def probabilities_batch(detections, trackers, df, idxs,probabilities,fn):
+  dets=detections[:,0:-1]  
+  t=trackers[:,0:-1]
+  d=df[df['fn']==fn-1]
 
-
-def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
+  a= d[['x1','y1','x2','y2']].to_numpy() 
+  d2=df[df['fn']==fn-2]
+  a2= d2[['x1','y1','x2','y2']].to_numpy() 
+  ious=iou_batch(dets, a)
+  ious2=iou_batch(t, a2)
+  track_indicies=[]  
+  detection_indicies=[]
+  if(min(ious2.shape)!=0):
+    matched_indices_trackers = linear_assignment(-ious2)
+    for i in range(len(trackers)):
+      if(i in matched_indices_trackers[:,1]):
+        track_indicies.append(df.loc[(df['x1']==a2[i,0]) & (df['y1']==a2[i,1]) & (df['x2'] == a2[i,2]) & (df['y2'] == a2[i,3])].index.to_numpy()[0])
+      else:
+        track_indicies.append(-1)
+  if(min(ious.shape)!=0):
+    matched_indicies_detections = linear_assignment(-ious)
+    for i in range(len(detections)):
+      if(i in matched_indicies_detections[:,1]):
+        detection_indicies.append(df.loc[(df['x1']==a[i,0]) & (df['y1']==a[i,1]) & (df['x2'] == a[i,2]) & (df['y2'] == a[i,3])].index.to_numpy()[0])
+      else:
+        detection_indicies.append(-1)
+  matrix=np.zeros((len(detection_indicies), len(track_indicies)))
+  for i,d in enumerate(detection_indicies):
+    for q,t in enumerate(track_indicies):
+      if(t==-1 or d ==-1):
+        matrix[i,q]=0
+      else:
+        index=np.where((idxs[0]==t) & (idxs[1]==d))
+        if(min(index[0].shape)==0):
+          matrix[i,q]=0
+        else:
+          matrix[i,q]=probabilities[index[0][0]]
+  if(len(detection_indicies)!=len(detections) or len(track_indicies)!=len(trackers)):
+    new_mat=np.zeros(((len(detections)), len(trackers)))
+    matrix=new_mat
+  return matrix
+def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3, df=None, idxs=None, probabilities=None, fn=None, weight=None, probability_model=None):
   """
   Assigns detections to tracked object (both represented as bounding boxes)
 
@@ -161,7 +210,23 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
     return np.empty((0,2),dtype=int), np.arange(len(detections)), np.empty((0,5),dtype=int)
 
   iou_matrix = iou_batch(detections, trackers)
+  if(df is not None and idxs is not None and probabilities is not None and fn is not None):
+    probabilities_matrix= probabilities_batch(detections, trackers,df, idxs, probabilities, fn)
+  else:
+    probabilities_matrix=None
+  
+  if(probability_model is not None):
+    model_matrix=model_batch(detections,trackers, probability_model)
+  else:
+    model_matrix=None
+  # assert probabilities_matrix.shape==iou_matrix.shape or (min(probabilities_matrix.shape)== min(iou_matrix.shape) ==0)
+  if(probabilities_matrix is not None):
+    iou_matrix=(1-weight)*iou_matrix+probabilities_matrix * weight
 
+  if(model_matrix is not None):
+    iou_matrix=(1-weight)*iou_matrix+model_matrix * weight
+    
+    # iou_matrix= iou_matrix/np.max(iou_matrix)
   if min(iou_matrix.shape) > 0:
     a = (iou_matrix > iou_threshold).astype(np.int32)
     if a.sum(1).max() == 1 and a.sum(0).max() == 1:
@@ -197,7 +262,7 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
 
 
 class Sort(object):
-  def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3):
+  def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3, df=None, idxs=None, probabilities=None, weight=None, probability_model=None):
     """
     Sets key parameters for SORT
     """
@@ -206,7 +271,13 @@ class Sort(object):
     self.iou_threshold = iou_threshold
     self.trackers = []
     self.frame_count = 0
+    self.df=df
+    self.idxs=idxs
+    self.probabilities=probabilities
+    self.weight=weight
 
+
+    self.probability_model=probability_model
   def update(self, dets=np.empty((0, 5))):
     """
     Params:
@@ -229,7 +300,7 @@ class Sort(object):
     trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
     for t in reversed(to_del):
       self.trackers.pop(t)
-    matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks, self.iou_threshold)
+    matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks, self.iou_threshold, df=self.df, idxs=self.idxs, probabilities=self.probabilities, fn=self.frame_count, weight=self.weight, probability_model=self.probability_model)
 
     # update matched trackers with assigned detections
     for m in matched:
