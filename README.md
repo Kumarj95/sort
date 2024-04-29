@@ -8,6 +8,13 @@ pip3 install -r requirements.txt
 ```
 Once the conda environment is set up we need to set up the data. For the purposes of reproduction we simply provide a download link to the detection results used as input for the methods. A zip file of the data can be downloaded [here](https://drive.google.com/file/d/1AThGMYDdZYInua2yFE-7SQxgfudLSGjZ/view?usp=sharing) (If unable to access please reach out to me at my email kj323@yorku.ca)
 
+Along with the main enviroment we also make use of a secondary environment to circumvent some issues with the stored versions of the detection results. To set up the seconday environment follow the following steps: 
+
+```bash
+conda create -n pandasver python=3.8.18
+conda activate pandasver
+pip3 install -r requirements2.txt
+```
 The dataset contains the detection results along with ground truths as well as the edge probability files. Extract the zip to the same directory as the repository. Once they have been extracted, run the file main.py with the following commands (making sure you also have params1d.npy)
 
 ```bash
