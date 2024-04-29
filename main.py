@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from sort import *
+from sort_old import *
 from tqdm import tqdm
 import pickle5 as pickle
 import motmetrics as mm
@@ -86,9 +87,10 @@ def main(args):
     max_age=args.MaxAge
     min_hits=args.MinHits
     iou_threshold=args.IouThreshold
+
     mot_tracker = Sort(max_age, min_hits, iou_threshold/2) #create instance of the SORT tracker
     res_dfs=[[],[],[]]
-    for detection, result_path, EdgeIdx, EdgeAttr in zip(args.Detections, args.ResultPath, args.EdgeIdxs, args.EdgeAttributes):
+    for detection, result_path, EdgeIdx, EdgeAttr in tqdm(zip(args.Detections, args.ResultPath, args.EdgeIdxs, args.EdgeAttributes)):
         try:
             with open(detection, "rb") as fh:
                 detection_df = pickle.load(fh)
@@ -101,7 +103,7 @@ def main(args):
                 frame_df = detection_df[detection_df.fn == frame_num]
                 # create dets --> this is the part when information is converted/grouped
                 dets = frame_df[["x1", "y1", "x2", "y2", "score"]].to_numpy()
-                trackers = mot_tracker.update(dets)
+                trackers = mot_tracker.update(dets,frame_num)
                 for d in trackers:
                     print('%d,%d,%.4f,%.4f,%.4f,%.4f'%(frame_num,d[4],d[0],d[1],d[2],d[3]), file=f) # using frame_num so that trakcing df and detection df are synced
         res_dfs[0].append(df(result_path[0]))
@@ -131,7 +133,7 @@ def main(args):
             with open(args.ParamsPth, 'rb') as f:
                 mean=np.load(f)
                 var= np.load(f)
-            mot_tracker = Sort(max_age, min_hits, iou_threshold, probability_model=(mean,var), weight=args.Weight) #create instance of the SORT tracker
+            mot_tracker = Sort(max_age, min_hits, iou_threshold/2, probability_model=(mean,var), weight=args.Weight) #create instance of the SORT tracker
             if(not os.path.exists(result_path[2])):
                 pathlib.Path(result_path[2]).parents[0].mkdir(parents=True, exist_ok=True)
             with open(result_path[2], 'w') as f:

@@ -11,16 +11,16 @@ np.random.seed(0)
 max_age=19
 min_hits=1
 iou_threshold=0.5
-DetectionPkl="/mnt/dataB/AIC23_Track1_MTMC_Tracking/train/S002/c009/Results/Detection/video.detection.InternImage.pkl"
-idx_pth="/mnt/dataB/AIC23_Track1_MTMC_Tracking/train/S002/c009/Results/Tracking/video.tracking.InternImage.MPNN1.EdgeIdx.npy"
-attr_pth="/mnt/dataB/AIC23_Track1_MTMC_Tracking/train/S002/c009/Results/Tracking/video.tracking.InternImage.MPNN1.EdgeAttr.npy"
-gt_path="/mnt/dataB/AIC23_Track1_MTMC_Tracking/train/S002/c009/Results/Tracking/video.tracking.GT.GT.pkl"
+DetectionPkl="/home/kumar/sort/dataset/c033/video.detection.InternImage.hdf"
+idx_pth="/home/kumar/sort/dataset/c033/video.tracking.InternImage.MPNN1.EdgeIdx.npy"
+attr_pth="/home/kumar/sort/dataset/c033/video.tracking.InternImage.MPNN1.EdgeAttr.npy"
+gt_path="/home/kumar/sort/dataset/c033/video.tracking.GT.GT.pkl"
 idx=np.load(idx_pth)
 attr_pth=np.load(attr_pth)
 # detection_df = pd.read_pickle(DetectionPkl)
-with open(DetectionPkl, "rb") as fh:
-  detection_df = pickle.load(fh)
-
+# with open(DetectionPkl, "rb") as fh:
+#   detection_df = pickle.load(fh)
+detection_df=pd.read_hdf(DetectionPkl)
 # finish tracking hyperparams
 def df(result_path):
     data = {}
@@ -54,17 +54,17 @@ def compare_dataframes(gts, ts):
         accs.append(mm.utils.compare_to_groundtruth(gts[k], tsacc, 'iou', distth=0.5))
         names.append(k)
     return accs, names
-
-# mot_tracker = Sort(max_age, min_hits, 0.25, df=detection_df, idxs=idx, probabilities=attr_pth, weight=0.3) #create instance of the SORT tracker
-# inp_np= np.random.random()
-# with open("results.txt", 'w') as outfile:
-#   for frame_num in tqdm(range(int(detection_df.fn.min()), int(detection_df.fn.max()+1))): #looping from df.fn.min to df.fn.max
-#       frame_df = detection_df[detection_df.fn == frame_num]
-#       # create dets --> this is the part when information is converted/grouped
-#       dets = frame_df[["x1", "y1", "x2", "y2", "score"]].to_numpy()
-#       trackers = mot_tracker.update(dets)
-#       for d in trackers:
-#           print('%d,%d,%.4f,%.4f,%.4f,%.4f'%(frame_num,d[4],d[0],d[1],d[2],d[3]), file=outfile) # using frame_num so that trakcing df and detection df are synced
+# detection_df=detection_df[detection_df['fn']<5]
+mot_tracker = Sort(max_age, min_hits, 0.25, df=detection_df, idxs=idx, probabilities=attr_pth, weight=0.3) #create instance of the SORT tracker
+inp_np= np.random.random()
+with open("results.txt", 'w') as outfile:
+  for frame_num in tqdm(range(int(detection_df.fn.min()), int(detection_df.fn.max()+1))): #looping from df.fn.min to df.fn.max
+      frame_df = detection_df[detection_df.fn == frame_num]
+      # create dets --> this is the part when information is converted/grouped
+      dets = frame_df[["x1", "y1", "x2", "y2", "score"]].to_numpy()
+      trackers = mot_tracker.update(dets)
+      for d in trackers:
+          print('%d,%d,%.4f,%.4f,%.4f,%.4f'%(frame_num,d[4],d[0],d[1],d[2],d[3]), file=outfile) # using frame_num so that trakcing df and detection df are synced
 
 # mot_tracker = Sort(max_age, min_hits, iou_threshold) #create instance of the SORT tracker
 # inp_np= np.random.random()
@@ -87,23 +87,23 @@ with open("params1d.npy", 'rb') as f:
 
 mot_tracker = Sort(max_age, min_hits, iou_threshold, probability_model=(mean,var), weight=0.2) #create instance of the SORT tracker
 # inp_np= np.random.random()
-with open("results3.txt", 'w') as outfile:
-  for frame_num in tqdm(range(int(detection_df.fn.min()), int(detection_df.fn.max()+1))): #looping from df.fn.min to df.fn.max
-      frame_df = detection_df[detection_df.fn == frame_num]
-      # create dets --> this is the part when information is converted/grouped
-      dets = frame_df[["x1", "y1", "x2", "y2", "score"]].to_numpy()
-      trackers = mot_tracker.update(dets)
-      for d in trackers:
-          print('%d,%d,%.4f,%.4f,%.4f,%.4f'%(frame_num,d[4],d[0],d[1],d[2],d[3]), file=outfile) # using frame_num so that trakcing df and detection df are synced
+# with open("results3.txt", 'w') as outfile:
+#   for frame_num in tqdm(range(int(detection_df.fn.min()), int(detection_df.fn.max()+1))): #looping from df.fn.min to df.fn.max
+#       frame_df = detection_df[detection_df.fn == frame_num]
+#       # create dets --> this is the part when information is converted/grouped
+#       dets = frame_df[["x1", "y1", "x2", "y2", "score"]].to_numpy()
+#       trackers = mot_tracker.update(dets)
+#       for d in trackers:
+#           print('%d,%d,%.4f,%.4f,%.4f,%.4f'%(frame_num,d[4],d[0],d[1],d[2],d[3]), file=outfile) # using frame_num so that trakcing df and detection df are synced
 
 df1= [df("results.txt")]
-df2=[df("results2.txt")]
-df3=[df("results3.txt")]
+df2=[df("/home/kumar/sort/dataset/Results/c033/result1.txt")]
+df3=[df("/home/kumar/sort/dataset/Results/c033/result0.txt")]
 
 with open(gt_path, "rb") as fh:
   df_gt = pickle.load(fh)
-print(df1)
-print(df2)
+# print(df1)
+# print(df2)
 
 gt_dfs = prepare_df_for_motmetric([df_gt], [1])
 pred_dfs = prepare_df_for_motmetric(df1, [1])

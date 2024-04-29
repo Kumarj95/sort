@@ -16,7 +16,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 from __future__ import print_function
-
+import line_profiler
 import os
 import numpy as np
 import matplotlib
@@ -159,14 +159,14 @@ def model_batch(detections,trackers,model):
   if(min(position_diff.shape)>0):
     position_diff= (position_diff-np.min(position_diff))/ (np.max(position_diff)-np.min(position_diff))
   return position_diff
+# @profile
 def probabilities_batch(detections, trackers, df, idxs,probabilities,fn):
   dets=detections[:,0:-1]  
   t=trackers[:,0:-1]
-  d=df[df['fn']==fn-1]
-
-  a= d[['x1','y1','x2','y2']].to_numpy() 
-  d2=df[df['fn']==fn-2]
-  a2= d2[['x1','y1','x2','y2']].to_numpy() 
+  d=df[df[:,1]==fn]
+  a= d[:,4:] 
+  d2=df[df[:,1]==fn-1]
+  a2= d2[:,4:] 
   ious=iou_batch(dets, a)
   ious2=iou_batch(t, a2)
   track_indicies=[]  
@@ -174,15 +174,15 @@ def probabilities_batch(detections, trackers, df, idxs,probabilities,fn):
   if(min(ious2.shape)!=0):
     matched_indices_trackers = linear_assignment(-ious2)
     for i in range(len(trackers)):
-      if(i in matched_indices_trackers[:,1]):
-        track_indicies.append(df.loc[(df['x1']==a2[i,0]) & (df['y1']==a2[i,1]) & (df['x2'] == a2[i,2]) & (df['y2'] == a2[i,3])].index.to_numpy()[0])
+      if(i in matched_indices_trackers[:,0]):
+        track_indicies.append(d2[matched_indices_trackers[matched_indices_trackers[:,0]==i,1]][0,0])
       else:
         track_indicies.append(-1)
   if(min(ious.shape)!=0):
     matched_indicies_detections = linear_assignment(-ious)
     for i in range(len(detections)):
-      if(i in matched_indicies_detections[:,1]):
-        detection_indicies.append(df.loc[(df['x1']==a[i,0]) & (df['y1']==a[i,1]) & (df['x2'] == a[i,2]) & (df['y2'] == a[i,3])].index.to_numpy()[0])
+      if(i in matched_indicies_detections[:,0]):
+        detection_indicies.append(d[matched_indicies_detections[matched_indicies_detections[:,0]==i,1]][0,0])
       else:
         detection_indicies.append(-1)
   matrix=np.zeros((len(detection_indicies), len(track_indicies)))
@@ -207,11 +207,12 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3, df
   Returns 3 lists of matches, unmatched_detections and unmatched_trackers
   """
   if(len(trackers)==0):
-    return np.empty((0,2),dtype=int), np.arange(len(detections)), np.empty((0,5),dtype=int)
+    return np.empty((0,2),dtype=int), np.arange(len(detections)), np.empty((0,5),dtype=int), np.empty((0,5),dtype=int)
 
   iou_matrix = iou_batch(detections, trackers)
   if(df is not None and idxs is not None and probabilities is not None and fn is not None):
-    probabilities_matrix= probabilities_batch(detections, trackers,df, idxs, probabilities, fn)
+    d=df[(df[:,1] == fn) | (df[:,1] == fn-1)]
+    probabilities_matrix= probabilities_batch(detections, trackers,d, idxs, probabilities, fn)
   else:
     probabilities_matrix=None
   
@@ -221,10 +222,10 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3, df
     model_matrix=None
   # assert probabilities_matrix.shape==iou_matrix.shape or (min(probabilities_matrix.shape)== min(iou_matrix.shape) ==0)
   if(probabilities_matrix is not None):
-    iou_matrix=(1-weight)*iou_matrix+probabilities_matrix * weight
+    iou_matrix=(1-weight)*iou_matrix+ weight* probabilities_matrix 
 
   if(model_matrix is not None):
-    iou_matrix=(1-weight)*iou_matrix+model_matrix * weight
+    iou_matrix=iou_matrix+ weight* model_matrix 
     
     # iou_matrix= iou_matrix/np.max(iou_matrix)
   if min(iou_matrix.shape) > 0:
@@ -258,7 +259,7 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3, df
   else:
     matches = np.concatenate(matches,axis=0)
 
-  return matches, np.array(unmatched_detections), np.array(unmatched_trackers)
+  return matches, np.array(unmatched_detections), np.array(unmatched_trackers), probabilities_matrix
 
 
 class Sort(object):
@@ -275,10 +276,13 @@ class Sort(object):
     self.idxs=idxs
     self.probabilities=probabilities
     self.weight=weight
-
-
+    if(df is not None):
+      temp=df.to_numpy()
+      self.df= np.zeros((temp.shape[0], temp.shape[1]+1))
+      self.df[:,1:] =temp
+      self.df[:,0]=df.index.values
     self.probability_model=probability_model
-  def update(self, dets=np.empty((0, 5))):
+  def update(self, dets=np.empty((0, 5)), frame_num=None):
     """
     Params:
       dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
@@ -300,7 +304,8 @@ class Sort(object):
     trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
     for t in reversed(to_del):
       self.trackers.pop(t)
-    matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks, self.iou_threshold, df=self.df, idxs=self.idxs, probabilities=self.probabilities, fn=self.frame_count, weight=self.weight, probability_model=self.probability_model)
+    fn=self.frame_count if frame_num is None else frame_num
+    matched, unmatched_dets, unmatched_trks,a = associate_detections_to_trackers(dets,trks, self.iou_threshold, df=self.df, idxs=self.idxs, probabilities=self.probabilities, fn=fn, weight=self.weight, probability_model=self.probability_model)
 
     # update matched trackers with assigned detections
     for m in matched:
